@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: macos-15
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -24,9 +24,14 @@ jobs:
       - name: Assemble app bundle
         run: zsh scripts/build-app.sh
 
+      # upload-artifact does not preserve the executable bit, which would make
+      # the downloaded bundle unlaunchable; ditto keeps the bundle intact.
+      - name: Package
+        run: ditto -c -k --keepParent dist/FanPilot.app FanPilot.zip
+
       - name: Upload unsigned build
         uses: actions/upload-artifact@v4
         with:
           name: FanPilot-unsigned
-          path: dist/FanPilot.app
+          path: FanPilot.zip
           if-no-files-found: error

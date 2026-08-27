@@ -10,7 +10,16 @@ permissions:
 
 jobs:
   release:
-    runs-on: macos-15
+    runs-on: macos-latest
+    # Declared at job level so the steps' own `if:` conditions can see them;
+    # an `env:` block inside a step is not visible to that step's condition.
+    env:
+      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+      NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+      NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+      NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
     steps:
       - uses: actions/checkout@v4
 
@@ -26,10 +35,6 @@ jobs:
       # builds still produce a (locally signed) artifact instead of failing.
       - name: Sign with Developer ID
         if: env.MACOS_CERTIFICATE != ''
-        env:
-          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
         run: |
           echo "$MACOS_CERTIFICATE" | base64 --decode > certificate.p12
           security create-keychain -p runner build.keychain
@@ -50,10 +55,6 @@ jobs:
 
       - name: Notarize and staple
         if: env.NOTARY_KEY != ''
-        env:
-          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
-          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
-          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
         run: |
           echo "$NOTARY_KEY" | base64 --decode > notary.p8
           ditto -c -k --keepParent dist/FanPilot.app FanPilot-notarize.zip
@@ -65,8 +66,27 @@ jobs:
       - name: Package
         run: ditto -c -k --keepParent dist/FanPilot.app FanPilot.zip
 
+      - name: Report what was published
+        run: |
+          if [ -n "$MACOS_CERTIFICATE" ]; then
+            echo "SIGNED=yes" >> "$GITHUB_ENV"
+          else
+            echo "SIGNED=no" >> "$GITHUB_ENV"
+          fi
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           files: FanPilot.zip
           generate_release_notes: true
+          append_body: true
+          body: |
+            Built from this tag by GitHub Actions. Signed with a Developer ID: ${{ env.SIGNED }}.
+
+            An unsigned build is refused by Gatekeeper, and its privileged helper
+            cannot register — fan control will not work. Monitoring, charts and
+            history do. For fan control, build from source:
+
+            ```
+            zsh scripts/build-app.sh && open dist/FanPilot.app
+            ```
