@@ -31,9 +31,9 @@ FANPILOT_BIN="$(swift build -c release --disable-sandbox --show-bin-path)"
 /bin/cp "$FANPILOT_BIN/FanPilot" "$FANPILOT_APP/Contents/MacOS/FanPilot"
 /bin/cp "$FANPILOT_BIN/FanPilotHelper" "$FANPILOT_APP/Contents/MacOS/FanPilotHelper"
 
-/usr/bin/codesign --force --sign - --identifier "$FANPILOT_HELPER_ID" "$FANPILOT_APP/Contents/MacOS/FanPilotHelper"
-/usr/bin/codesign --force --sign - --identifier "$FANPILOT_APP_ID" "$FANPILOT_APP/Contents/MacOS/FanPilot"
-/usr/bin/codesign --force --sign - --identifier "$FANPILOT_APP_ID" "$FANPILOT_APP"
+/usr/bin/codesign --force --options runtime --sign - --identifier "$FANPILOT_HELPER_ID" "$FANPILOT_APP/Contents/MacOS/FanPilotHelper"
+/usr/bin/codesign --force --options runtime --sign - --identifier "$FANPILOT_APP_ID" "$FANPILOT_APP/Contents/MacOS/FanPilot"
+/usr/bin/codesign --force --options runtime --sign - --identifier "$FANPILOT_APP_ID" "$FANPILOT_APP"
 
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$FANPILOT_APP"
 /usr/bin/plutil -lint "$FANPILOT_APP/Contents/Info.plist"

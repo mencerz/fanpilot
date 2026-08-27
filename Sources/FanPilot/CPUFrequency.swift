@@ -47,7 +47,8 @@ final class CPUFrequencyReader: @unchecked Sendable {
 
     init?() {
         guard let library = dlopen("/usr/lib/libIOReport.dylib", RTLD_LAZY) else {
-            frequencyLog.error("dlopen(libIOReport) failed: \(String(cString: dlerror()), privacy: .public)")
+            let reason = dlerror().map { String(cString: $0) } ?? "unknown error"
+            frequencyLog.error("dlopen(libIOReport) failed: \(reason, privacy: .public)")
             return nil
         }
         func symbol(_ name: String) -> UnsafeMutableRawPointer? { dlsym(library, name) }

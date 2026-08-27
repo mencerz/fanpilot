@@ -24,6 +24,9 @@ final class FanMonitor {
     /// retrying for a few seconds instead of snapping back at the first no.
     private(set) var pendingMode: FanMode?
     private var pendingDeadline: Date?
+    /// Bumped whenever a request is cancelled or completed, so a reply that
+    /// arrives after the deadline cannot force the fans behind the user's back.
+    private var pendingGeneration = 0
     private var pendingFailure: String?
     private let engageTimeout: TimeInterval = 10
     private(set) var system = SystemMetrics()
@@ -178,6 +181,9 @@ final class FanMonitor {
         } else if !control.isReady {
             returnToSystem(reason: "Fan control returned to macOS because the helper connection was lost.")
             return
+        } else if snapshot.fans.isEmpty {
+            returnToSystem(reason: "Fan control stopped because the fan sensors stopped responding.")
+            return
         } else if mode == .automatic, !snapshotIsSafeForAutomaticControl {
             returnToSystem(reason: "Automatic control stopped because sensor data became unavailable or invalid.")
             return
@@ -241,7 +247,12 @@ final class FanMonitor {
                     lastError = "Fan control is busy. Try again in a moment."
                     return
                 }
+                let generation = pendingGeneration
                 guard await applyTarget(for: newMode, isEngaging: true) else { return }
+                guard generation == pendingGeneration else {
+                    _ = await control.setSystemMode()
+                    return
+                }
                 finishPendingSwitch(to: newMode)
                 history.record(
                     snapshot: snapshot,
@@ -258,15 +269,14 @@ final class FanMonitor {
 
     private func finishPendingSwitch(to newMode: FanMode) {
         mode = newMode
-        pendingMode = nil
-        pendingDeadline = nil
-        pendingFailure = nil
+        cancelPendingSwitch()
     }
 
     private func cancelPendingSwitch() {
         pendingMode = nil
         pendingDeadline = nil
         pendingFailure = nil
+        pendingGeneration &+= 1
     }
 
     /// Retries the switch the user asked for until the helper accepts it or the
@@ -279,8 +289,13 @@ final class FanMonitor {
             lastError = "Could not switch to \(requested.rawValue): \(reason)"
             return
         }
+        let generation = pendingGeneration
         Task {
             if await applyTarget(for: requested, isEngaging: true) {
+                guard generation == pendingGeneration else {
+                    _ = await control.setSystemMode()
+                    return
+                }
                 finishPendingSwitch(to: requested)
                 history.record(
                     snapshot: snapshot,
@@ -458,6 +473,7 @@ final class FanMonitor {
         if requestedMode == .automatic {
             autopilot.reset(to: curve.minimumPercent)
         }
+        cancelPendingSwitch()
         if await applyTarget(for: requestedMode) {
             mode = requestedMode
         }

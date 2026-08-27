@@ -83,3 +83,27 @@ func pausedRecordingKeepsHistoryUntouched() {
     )
     #expect(store.samples.isEmpty)
 }
+
+@Test @MainActor
+func unreadableHistoryIsQuarantinedInsteadOfOverwritten() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("FanPilotTests-\(UUID().uuidString)", isDirectory: true)
+    let url = directory.appendingPathComponent("history.json")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try Data("{ this is not history }".utf8).write(to: url)
+
+    let store = HistoryStore(storageURL: url, defaults: isolatedDefaults())
+    #expect(store.storageError != nil)
+
+    // Recording must not be what destroys the file that failed to decode.
+    store.record(
+        snapshot: ThermalSnapshot(temperature: 55, fans: [], capturedAt: .now),
+        mode: .system,
+        targetPercent: nil,
+        force: true
+    )
+    let quarantined = url.appendingPathExtension("unreadable")
+    #expect(FileManager.default.fileExists(atPath: quarantined.path))
+    #expect(try Data(contentsOf: quarantined) == Data("{ this is not history }".utf8))
+}

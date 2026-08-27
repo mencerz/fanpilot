@@ -152,7 +152,12 @@ final class HistoryStore {
             )
             prune(relativeTo: .now)
         } catch {
-            storageError = "History could not be loaded: \(error.localizedDescription)"
+            // The next record() would persist over the unreadable file and take
+            // the week with it, so it is moved aside instead.
+            let quarantine = storageURL.appendingPathExtension("unreadable")
+            try? FileManager.default.removeItem(at: quarantine)
+            try? FileManager.default.moveItem(at: storageURL, to: quarantine)
+            storageError = "History could not be read and was kept as \(quarantine.lastPathComponent): \(error.localizedDescription)"
         }
     }
 

@@ -157,7 +157,12 @@ final class FanControlService {
             options: .privileged
         )
         newConnection.remoteObjectInterface = NSXPCInterface(with: FanPilotHelperProtocol.self)
-        newConnection.setCodeSigningRequirement(fanPilotCodeRequirement(identifier: fanPilotHelperIdentifier))
+        let helperBinary = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/FanPilotHelper")
+        guard let requirement = fanPilotCodeRequirement(identifier: fanPilotHelperIdentifier, pinnedTo: helperBinary) else {
+            state = .failed("The helper in this app bundle could not be verified.")
+            return
+        }
+        newConnection.setCodeSigningRequirement(requirement)
         newConnection.interruptionHandler = { [weak self] in
             Task { @MainActor in self?.state = .failed("Fan control helper was interrupted.") }
         }
@@ -174,7 +179,10 @@ final class FanControlService {
         }
         switch result {
         case .success: state = .ready
-        case .failure(let error): state = .failed(error.localizedDescription)
+        case .failure(let error):
+            // An unsigned build pins the peer by code hash, so a helper left
+            // running from an older build no longer matches after a rebuild.
+            state = .failed(error.localizedDescription + " Use Reinstall Helper after rebuilding.")
         }
     }
 
@@ -187,9 +195,13 @@ final class FanControlService {
         guard let connection else { return .failure(.notConnected) }
         let result: Result<T, ControlError> = await withCheckedContinuation { continuation in
             let once = ResumeOnce(continuation)
-            let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+            // XPC invokes this from its own queue. Declared inline it would
+            // inherit MainActor isolation and trip the executor assertion, so
+            // it is explicitly Sendable and hops back deliberately.
+            let onError: @Sendable (any Error) -> Void = { error in
                 once.finish(.failure(.transport(error.localizedDescription)))
-            } as? FanPilotHelperProtocol
+            }
+            let proxy = connection.remoteObjectProxyWithErrorHandler(onError) as? FanPilotHelperProtocol
             guard let proxy else {
                 once.finish(.failure(.notConnected))
                 return
@@ -207,9 +219,10 @@ final class FanControlService {
     }
 
     private func remoteProxy() -> FanPilotHelperProtocol? {
-        connection?.remoteObjectProxyWithErrorHandler { [weak self] error in
+        let onError: @Sendable (any Error) -> Void = { [weak self] error in
             Task { @MainActor in self?.state = .failed(error.localizedDescription) }
-        } as? FanPilotHelperProtocol
+        }
+        return connection?.remoteObjectProxyWithErrorHandler(onError) as? FanPilotHelperProtocol
     }
 
     private func disconnect() {

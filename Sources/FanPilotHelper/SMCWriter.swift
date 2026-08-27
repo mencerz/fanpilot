@@ -7,7 +7,13 @@ final class SMCWriter: @unchecked Sendable {
     private let connection: io_connect_t
     private(set) var touchedFans: Set<Int> = []
     private var ownsThermalUnlock = false
-    private let manualModeRetryLimit = 30
+    // The app retries an engage request for ten seconds, so the helper only
+    // needs a short burst here: every extra second blocks the shared SMC queue,
+    // and the heartbeat watchdog and the sleep handler both live on it.
+    private let manualModeRetryLimit = 5
+    /// Keys are four characters, so a two-digit fan index would silently build
+    /// a different key.
+    private let maximumFanIndex = 10
     private let manualModeRetryDelay: TimeInterval = 0.1
 
     init?() {
@@ -30,13 +36,20 @@ final class SMCWriter: @unchecked Sendable {
     }
 
     func setTargetRPM(fan: Int, requestedRPM: Int) -> Result<Int, SMCWriteError> {
-        guard fan >= 0 && fan < fanCount else { return .failure(.invalidFan) }
-        let minimum = Int((readNumber("F\(fan)Mn") ?? 0).rounded())
-        let maximum = Int((readNumber("F\(fan)Mx") ?? 0).rounded())
+        guard fan >= 0, fan < min(fanCount, maximumFanIndex) else { return .failure(.invalidFan) }
+        guard let rawMinimum = readNumber("F\(fan)Mn"), rawMinimum.isFinite,
+              let rawMaximum = readNumber("F\(fan)Mx"), rawMaximum.isFinite else {
+            return .failure(.invalidRange)
+        }
+        let minimum = Int(rawMinimum.rounded())
+        let maximum = Int(rawMaximum.rounded())
         guard minimum > 0, maximum >= minimum else { return .failure(.invalidRange) }
         let target = min(max(requestedRPM, minimum), maximum)
 
-        guard enableManualMode(fan: fan) else { return .failure(.manualModeRejected) }
+        guard enableManualMode(fan: fan) else {
+            releaseThermalUnlockIfIdle()
+            return .failure(.manualModeRejected)
+        }
         touchedFans.insert(fan)
         guard writeNumber("F\(fan)Tg", value: Double(target)) else { return .failure(.targetRejected) }
         return .success(target)
@@ -46,14 +59,18 @@ final class SMCWriter: @unchecked Sendable {
     /// and the SMC keeps that state until somebody clears it. Only fans that
     /// are actually still in manual mode are touched here.
     func recoverFromPreviousSession() {
-        for fan in 0..<max(0, min(fanCount, 8)) where readNumber("F\(fan)Md") == 1 {
-            let restored = writeNumber("F\(fan)Md", value: 0)
-            log.notice("Recovered fan \(fan, privacy: .public) from a leftover manual mode: \(restored, privacy: .public)")
+        // The mode key does not read back the value that was written to it — a
+        // forced fan reports 0 or 3 like any other — so a leftover forced fan
+        // cannot be detected, only cleared. Writing 0 to a fan macOS already
+        // controls changes nothing, which makes this safe to do unconditionally.
+        for fan in 0..<max(0, min(fanCount, maximumFanIndex)) {
+            _ = writeNumber("F\(fan)Md", value: 0)
         }
         if readNumber("Ftst") == 1 {
             let released = writeNumber("Ftst", value: 0)
             log.notice("Released a leftover thermal unlock: \(released, privacy: .public)")
         }
+        log.notice("Startup recovery returned \(min(self.fanCount, self.maximumFanIndex), privacy: .public) fans to macOS")
     }
 
     @discardableResult
@@ -77,10 +94,7 @@ final class SMCWriter: @unchecked Sendable {
 
         // The thermal unlock is what makes the mode key writable, so it is only
         // released once every fan is verified to be back under system control.
-        if ownsThermalUnlock, touchedFans.isEmpty {
-            success = writeNumber("Ftst", value: 0) && success
-            ownsThermalUnlock = false
-        }
+        success = releaseThermalUnlockIfIdle() && success
         if !restored.isEmpty {
             let list = restored.sorted().map(String.init).joined(separator: ", ")
             log.notice("Returned fans [\(list, privacy: .public)] to system control")
@@ -88,7 +102,23 @@ final class SMCWriter: @unchecked Sendable {
         return success
     }
 
-    private var fanCount: Int { Int(readNumber("FNum") ?? 0) }
+    /// Clearing the unlock is only attempted while no fan is still forced, and
+    /// ownership is kept until the write actually succeeds so a failure retries.
+    @discardableResult
+    private func releaseThermalUnlockIfIdle() -> Bool {
+        guard ownsThermalUnlock, touchedFans.isEmpty else { return true }
+        guard writeNumber("Ftst", value: 0) else {
+            log.error("Thermal unlock could not be released; will retry")
+            return false
+        }
+        ownsThermalUnlock = false
+        return true
+    }
+
+    private var fanCount: Int {
+        guard let count = readNumber("FNum"), count.isFinite, count >= 0 else { return 0 }
+        return Int(count)
+    }
 
     private func enableManualMode(fan: Int) -> Bool {
         let currentMode = readNumber("F\(fan)Md").map(Int.init) ?? -1
@@ -159,7 +189,7 @@ final class SMCWriter: @unchecked Sendable {
         case fourCharCode("flt "):
             var value: Float = 0
             withUnsafeMutableBytes(of: &value) { $0.copyBytes(from: bytes.prefix(4)) }
-            return Double(value)
+            return value.isFinite ? Double(value) : nil
         case fourCharCode("fpe2"):
             return Double(UInt16(bytes[0]) << 8 | UInt16(bytes[1])) / 4
         case fourCharCode("ui8 "):

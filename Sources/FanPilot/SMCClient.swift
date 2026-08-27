@@ -42,7 +42,7 @@ final class SMCClient: HardwareMonitoring, @unchecked Sendable {
 
         let fanCount = Int(readNumber(key: "FNum") ?? 0)
         let fans = (0..<max(0, min(fanCount, 8))).compactMap { index -> FanReading? in
-            guard let actual = readNumber(key: "F\(index)Ac") else { return nil }
+            guard let actual = readNumber(key: "F\(index)Ac"), actual.isFinite else { return nil }
             return FanReading(
                 id: index,
                 name: fanName(index: index, count: fanCount),
@@ -134,7 +134,9 @@ final class SMCClient: HardwareMonitoring, @unchecked Sendable {
         input.key = fourCharCode(key)
         input.keyInfo.dataSize = info.dataSize
         input.data8 = 5
-        guard call(&input) == KERN_SUCCESS else { return nil }
+        // The driver reports per-key failures in `result`; without this a
+        // rejected read is decoded from whatever happens to be in the buffer.
+        guard call(&input) == KERN_SUCCESS, input.result == 0 else { return nil }
 
         let bytes = input.bytes.array
         switch info.dataType {
@@ -147,7 +149,7 @@ final class SMCClient: HardwareMonitoring, @unchecked Sendable {
             withUnsafeMutableBytes(of: &value) { destination in
                 destination.copyBytes(from: bytes.prefix(4))
             }
-            return Double(value)
+            return value.isFinite ? Double(value) : nil
         case fourCharCode("ui8 "):
             return Double(bytes[0])
         case fourCharCode("ui16"):
@@ -168,7 +170,7 @@ final class SMCClient: HardwareMonitoring, @unchecked Sendable {
         var input = SMCParamStruct()
         input.key = fourCharCode(key)
         input.data8 = 9
-        guard call(&input) == KERN_SUCCESS, input.keyInfo.dataSize > 0 else { return nil }
+        guard call(&input) == KERN_SUCCESS, input.result == 0, input.keyInfo.dataSize > 0 else { return nil }
         return input.keyInfo
     }
 

@@ -172,7 +172,7 @@ struct FanMenuView: View {
             // A single detail line beats five tooltips: no hover delay, no
             // popovers covering the rings, and the row height never jumps.
             Text(ringDetail)
-                .font(.caption)
+                .font(.callout.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
@@ -192,9 +192,9 @@ struct FanMenuView: View {
             return String(format: "P-cores %.2f of %.2f GHz", performance / 1000, ceiling / 1000) + efficiency
         case "RAM":
             let swap = system.swapUsedBytes > 0
-                ? " · swap \(compactBytes(Int64(system.swapUsedBytes)))"
+                ? " · swap \(compactBytes(Int64(system.swapUsedBytes), binary: true))"
                 : ""
-            return "\(compactBytes(Int64(system.memoryUsedBytes))) used of \(compactBytes(Int64(system.memoryTotalBytes)))" + swap
+            return "\(compactBytes(Int64(system.memoryUsedBytes), binary: true)) used of \(compactBytes(Int64(system.memoryTotalBytes), binary: true))" + swap
         case "GPU":
             return "\(Int((system.gpuUsage ?? 0) * 100))% device utilisation"
         case "Disk":
@@ -210,13 +210,16 @@ struct FanMenuView: View {
     // Captions share a narrow column, so each one carries a single number and
     // the ring itself carries the proportion.
     private var memoryCaption: String {
-        "\(compactBytes(Int64(monitor.system.memoryUsedBytes))) used"
+        "\(compactBytes(Int64(monitor.system.memoryUsedBytes), binary: true)) used"
     }
 
     /// One value, at most one decimal, unit picked so it always fits the column.
-    private func compactBytes(_ bytes: Int64) -> String {
+    /// Memory is counted in binary units the way macOS reports it (24 GB of RAM
+    /// is 25.77 decimal GB); storage and traffic stay decimal, like Finder.
+    private func compactBytes(_ bytes: Int64, binary: Bool = false) -> String {
+        let step: Double = binary ? 1024 : 1000
         let units: [(threshold: Double, suffix: String)] = [
-            (1_000_000_000_000, "TB"), (1_000_000_000, "GB"), (1_000_000, "MB"), (1_000, "KB")
+            (pow(step, 4), "TB"), (pow(step, 3), "GB"), (pow(step, 2), "MB"), (step, "KB")
         ]
         let value = Double(max(bytes, 0))
         for unit in units where value >= unit.threshold {

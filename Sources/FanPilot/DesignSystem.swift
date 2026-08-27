@@ -148,7 +148,9 @@ struct FPModePicker: View {
                     .contentShape(RoundedRectangle(cornerRadius: 7))
                 }
                 .buttonStyle(.plain)
-                .disabled(pending != nil)
+                // Handing control back is the fail-safe: it stays clickable
+                // even while another switch is still being negotiated.
+                .disabled(pending != nil && mode != .system)
                 .accessibilityLabel("\(mode.rawValue) mode")
                 .accessibilityAddTraits(mode == selection ? [.isSelected] : [])
             }
