@@ -8,7 +8,7 @@ Built for Apple Silicon (developed on an M4, Mac16,1) with Intel fallbacks in th
   <img src="Docs/screenshots/menu-bar.png" alt="FanPilot menu bar popover" width="420">
 </p>
 
-The popover: temperature in the menu bar, a sparkline of the last readings, and five rings for CPU, memory, GPU, disk and network. Pointing at a ring spells the reading out in full underneath.
+The popover: temperature in the menu bar, a sparkline of the last readings, five rings for CPU, memory, GPU, disk and network, and who is currently in charge of cooling. Pointing at a ring spells its reading out in full underneath.
 
 ![History and diagnostics](Docs/screenshots/history.png)
 
