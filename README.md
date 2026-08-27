@@ -4,6 +4,20 @@ A native macOS menu bar app for watching what a MacBook is doing thermally — a
 
 Built for Apple Silicon (developed on an M4, Mac16,1) with Intel fallbacks in the sensor layer.
 
+<p align="center">
+  <img src="Docs/screenshots/menu-bar.png" alt="FanPilot menu bar popover" width="420">
+</p>
+
+The popover: temperature in the menu bar, a sparkline of the last readings, and five rings for CPU, memory, GPU, disk and network. Pointing at a ring spells the reading out in full underneath.
+
+![History and diagnostics](Docs/screenshots/history.png)
+
+History &amp; Diagnostics. One cursor drives every chart, so the temperature and the clock under the pointer belong to the same moment.
+
+![Autopilot tuning](Docs/screenshots/tuning.png)
+
+CPU frequency against this Mac's own ceiling, fan speed, and the autopilot curve — each control explaining itself with the numbers currently in effect.
+
 ## What it shows
 
 - Temperature from every plausible SMC sensor, refreshed on your own schedule, with a sparkline in the menu bar popover.
