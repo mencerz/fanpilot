@@ -117,7 +117,9 @@ final class CPUFrequencyReader: @unchecked Sendable {
             guard let name = channelName(dictionary)?.takeUnretainedValue() as String?,
                   let table = frequencyTables[name] else { return nil }
 
-            let count = Int(stateCount(dictionary))
+            // A negative count would make the range below trap, which this
+            // file's whole contract is to avoid.
+            let count = max(Int(stateCount(dictionary)), 0)
             var weighted = 0.0
             var total = 0.0
             for index in 0..<count {

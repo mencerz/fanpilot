@@ -30,7 +30,8 @@ public func fanPilotCodeRequirement(identifier: String, pinnedTo peer: URL?) -> 
     if let team = fanPilotTeamIdentifier() {
         return "anchor apple generic and identifier \"\(identifier)\" and certificate leaf[subject.OU] = \"\(team)\""
     }
-    guard let peer, let hash = fanPilotCodeHash(of: peer) else { return nil }
+    guard let peer, let hash = fanPilotCodeHash(of: peer),
+          hash.count >= 40, hash.allSatisfy(\.isHexDigit) else { return nil }
     return "cdhash H\"\(hash)\""
 }
 

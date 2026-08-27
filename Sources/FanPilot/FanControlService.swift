@@ -247,8 +247,15 @@ final class FanControlService {
     }
 
     private func remoteProxy() -> FanPilotHelperProtocol? {
+        // Per-call handlers outlive disconnect(), so this one carries the epoch
+        // it was made for; without it a stale failure knocks out the healthy
+        // connection that replaced it.
+        let issuedAt = epoch
         let onError: @Sendable (any Error) -> Void = { [weak self] error in
-            Task { @MainActor in self?.state = .failed(error.localizedDescription) }
+            Task { @MainActor in
+                guard let self, issuedAt == self.epoch else { return }
+                self.state = .failed(error.localizedDescription)
+            }
         }
         return connection?.remoteObjectProxyWithErrorHandler(onError) as? FanPilotHelperProtocol
     }

@@ -210,6 +210,10 @@ final class FanMonitor {
     func selectMode(_ newMode: FanMode) {
         // Returning to System must always be possible, even mid-attempt.
         if newMode == .system { cancelPendingSwitch() } else if pendingMode != nil { return }
+        // Every refusal below has to leave the pending state clean, or the
+        // picker locks up: refresh() only ever revisits a pending request while
+        // the app is in System mode.
+        defer { if pendingMode != nil, mode != .system { cancelPendingSwitch() } }
         guard newMode == .system || hasFanReadings else {
             mode = .system
             lastError = "Fan control is unavailable because no fan sensors were detected."
@@ -220,9 +224,10 @@ final class FanMonitor {
             lastError = "Fan control requires the privileged helper. macOS remains in control."
             return
         }
-        // Only taking control is an operation in progress; giving it back is
-        // the fail-safe and must never be gated behind one.
-        if newMode != .system {
+        // Only taking control from macOS is an operation with a retry window;
+        // moving between Auto and Manual either applies at once or falls back,
+        // and giving control back is the fail-safe that is never gated.
+        if newMode != .system, mode == .system {
             pendingMode = newMode
             pendingDeadline = Date().addingTimeInterval(engageTimeout)
             pendingFailure = nil
@@ -236,24 +241,33 @@ final class FanMonitor {
                     clearControlState()
                     lastError = nil
                 case .failure(let error):
-                    lastError = error.localizedDescription
+                    // The user asked macOS to take over; leaving the mode as it
+                    // was would have the control loop re-force the fans on the
+                    // next tick. The request is retried instead.
+                    mode = .system
+                    autopilot.reset(to: curve.minimumPercent)
+                    clearControlState()
+                    awaitingSystemRestore = true
+                    lastError = "macOS has not confirmed it is back in control of the fans: \(error.localizedDescription)"
                 }
             } else {
                 if newMode == .automatic {
                     guard snapshotIsSafeForAutomaticControl else {
+                        cancelPendingSwitch()
                         lastError = "Automatic control requires fresh, plausible temperature and fan readings."
                         return
                     }
                     autopilot.reset(to: curve.minimumPercent)
                 }
                 guard !isApplying else {
+                    cancelPendingSwitch()
                     lastError = "Fan control is busy. Try again in a moment."
                     return
                 }
                 let generation = pendingGeneration
                 guard await applyTarget(for: newMode, isEngaging: true) else { return }
                 guard generation == pendingGeneration else {
-                    _ = await control.setSystemMode()
+                    requestSystemMode()
                     return
                 }
                 finishPendingSwitch(to: newMode)
@@ -296,7 +310,7 @@ final class FanMonitor {
         Task {
             if await applyTarget(for: requested, isEngaging: true) {
                 guard generation == pendingGeneration else {
-                    _ = await control.setSystemMode()
+                    requestSystemMode()
                     return
                 }
                 finishPendingSwitch(to: requested)
@@ -450,8 +464,9 @@ final class FanMonitor {
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.mode != .system else { return }
-                self.control.setSystemModeSynchronously()
+                guard let self else { return }
+                if self.mode != .system { self.control.setSystemModeSynchronously() }
+                self.stop()
             }
         })
     }
@@ -531,12 +546,9 @@ final class FanMonitor {
     func stop() {
         timer?.invalidate()
         timer = nil
-        NSWorkspace.shared.notificationCenter.removeObserver(workspaceObservers[0])
-        if workspaceObservers.count > 1 {
-            NSWorkspace.shared.notificationCenter.removeObserver(workspaceObservers[1])
-        }
-        if workspaceObservers.count > 2 {
-            NotificationCenter.default.removeObserver(workspaceObservers[2])
+        for observer in workspaceObservers {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+            NotificationCenter.default.removeObserver(observer)
         }
         workspaceObservers.removeAll()
     }

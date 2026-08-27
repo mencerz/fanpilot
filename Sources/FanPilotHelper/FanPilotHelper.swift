@@ -11,9 +11,9 @@ final class FanPilotHelper: NSObject, FanPilotHelperProtocol, NSXPCListenerDeleg
     private let gate = NSLock()
     private var owner: ObjectIdentifier?
     private var queuedOperations = 0
+    private var lastHeartbeat = Date()
     private let maximumQueuedOperations = 4
     private let queue = DispatchQueue(label: "\(fanPilotHelperIdentifier).smc")
-    private var lastHeartbeat = Date()
     private var powerMonitor: SystemPowerMonitor?
     /// Resolved once at start-up, from our own location rather than from
     /// anything a caller says: the listener callback can run concurrently, and
@@ -44,10 +44,14 @@ final class FanPilotHelper: NSObject, FanPilotHelperProtocol, NSXPCListenerDeleg
             while let self {
                 Thread.sleep(forTimeInterval: 2)
                 self.queue.async {
-                    if Date().timeIntervalSince(self.lastHeartbeat) > 6,
-                       !(self.writer?.touchedFans.isEmpty ?? true) {
+                    // Ownership is released on timeout even when no fan was
+                    // ever forced: a client that claimed control and then hung
+                    // would otherwise lock every other session out forever.
+                    guard Date().timeIntervalSince(self.heartbeatTimestamp()) > 6 else { return }
+                    let hadControl = !(self.writer?.touchedFans.isEmpty ?? true)
+                    guard self.clearOwner() || hadControl else { return }
+                    if hadControl {
                         self.log.notice("Heartbeat timed out, returning fan control to macOS")
-                        _ = self.clearOwner()
                         self.writer?.restoreSystemControl()
                     }
                 }
@@ -112,7 +116,7 @@ final class FanPilotHelper: NSObject, FanPilotHelperProtocol, NSXPCListenerDeleg
             guard let self else { reply(false, 0, "Helper is shutting down."); return }
             defer { self.release() }
             guard let writer = self.writer else { reply(false, 0, "Unable to open AppleSMC."); return }
-            self.lastHeartbeat = .now
+            self.touchHeartbeat()
             switch writer.setTargetRPM(fan: fan, requestedRPM: rpm) {
             case .success(let applied): reply(true, applied, nil)
             case .failure(let error): reply(false, 0, error.localizedDescription)
@@ -126,12 +130,23 @@ final class FanPilotHelper: NSObject, FanPilotHelperProtocol, NSXPCListenerDeleg
         let isOwner = owner == nil || owner == caller
         gate.unlock()
         guard isOwner else { reply(false); return }
-        // Deliberately not on the SMC queue: a heartbeat must not wait behind
-        // a fan write, or a slow write would starve the very watchdog it feeds.
-        queue.async { [weak self] in
-            self?.lastHeartbeat = .now
-            reply(true)
-        }
+        // Under the lock rather than on the SMC queue: a heartbeat must not
+        // wait behind a fan write, or a slow write starves the very watchdog
+        // it is feeding.
+        touchHeartbeat()
+        reply(true)
+    }
+
+    private func touchHeartbeat() {
+        gate.lock()
+        lastHeartbeat = .now
+        gate.unlock()
+    }
+
+    private func heartbeatTimestamp() -> Date {
+        gate.lock()
+        defer { gate.unlock() }
+        return lastHeartbeat
     }
 
     private enum Claim {

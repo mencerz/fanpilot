@@ -50,7 +50,7 @@ final class HistoryStore {
     private var isLoaded = false
     private let retention: TimeInterval = 7 * 24 * 60 * 60
     private let persistenceInterval: TimeInterval = 60
-    private var lastPersistedAt: Date?
+    private var lastPersistUptime: TimeInterval?
     /// Wall clock can jump; the recording cadence is measured against uptime so
     /// a backwards correction cannot silently stop recording.
     private var lastRecordUptime: TimeInterval?
@@ -118,9 +118,11 @@ final class HistoryStore {
         }
         prune(relativeTo: snapshot.capturedAt)
 
-        if force || lastPersistedAt.map({ snapshot.capturedAt.timeIntervalSince($0) >= persistenceInterval }) != false {
+        // Uptime again, not wall clock: after a backward correction a date
+        // based comparison stays negative and nothing would ever be written.
+        if force || lastPersistUptime.map({ uptime - $0 >= persistenceInterval }) != false {
             persist()
-            lastPersistedAt = snapshot.capturedAt
+            lastPersistUptime = uptime
         }
     }
 

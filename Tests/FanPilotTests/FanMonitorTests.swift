@@ -123,20 +123,30 @@ func refreshIntervalThrottlesSampling() {
 }
 
 @Test @MainActor
-func systemModeIsAlwaysReachableWhileASwitchIsPending() {
+func refusedSwitchLeavesNoPendingRequestBehind() {
     let (monitor, directory) = makeMonitor(StubHardware(snapshot: healthySnapshot()))
     defer {
         monitor.stop()
         try? FileManager.default.removeItem(at: directory)
     }
 
-    // Without a helper the switch is refused outright, but the escape hatch
-    // back to System must never be blocked by a pending request.
+    // A pending request is only ever revisited while the app is in System mode,
+    // so one left behind by a refusal would disable the mode picker for good.
     monitor.selectMode(.manual)
-    monitor.selectMode(.system)
-
-    #expect(monitor.mode == .system)
     #expect(monitor.pendingMode == nil)
+
+    monitor.selectMode(.automatic)
+    #expect(monitor.pendingMode == nil)
+    #expect(monitor.mode == .system)
+}
+
+@Test @MainActor
+func stoppingTwiceIsHarmless() {
+    let (monitor, directory) = makeMonitor(StubHardware(snapshot: healthySnapshot()))
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    monitor.stop()
+    monitor.stop()
 }
 
 // IOReport is unexported API. Where it is missing the test is skipped rather
