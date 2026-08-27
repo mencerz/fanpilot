@@ -7,10 +7,11 @@ final class SMCWriter: @unchecked Sendable {
     private let connection: io_connect_t
     private(set) var touchedFans: Set<Int> = []
     private var ownsThermalUnlock = false
-    // The app retries an engage request for ten seconds, so the helper only
-    // needs a short burst here: every extra second blocks the shared SMC queue,
-    // and the heartbeat watchdog and the sleep handler both live on it.
-    private let manualModeRetryLimit = 5
+    // The SMC does not accept the mode write immediately after the thermal
+    // unlock; measured on an M4 it needs seconds, not milliseconds. A shorter
+    // budget here simply never acquires the fan. Queue occupancy is bounded
+    // instead by the ownership gate and the queue depth cap in the helper.
+    private let manualModeRetryLimit = 30
     /// Keys are four characters, so a two-digit fan index would silently build
     /// a different key.
     private let maximumFanIndex = 10
@@ -59,18 +60,18 @@ final class SMCWriter: @unchecked Sendable {
     /// and the SMC keeps that state until somebody clears it. Only fans that
     /// are actually still in manual mode are touched here.
     func recoverFromPreviousSession() {
-        // The mode key does not read back the value that was written to it — a
-        // forced fan reports 0 or 3 like any other — so a leftover forced fan
-        // cannot be detected, only cleared. Writing 0 to a fan macOS already
-        // controls changes nothing, which makes this safe to do unconditionally.
+        // A forced fan cannot be detected — the mode key does not read back the
+        // value written to it — but a thermal unlock left set does read back,
+        // and it only survives a process that died holding the fans. Absent
+        // that evidence the SMC is left alone: writing to it on every launch
+        // is exactly what "opening the app never touches hardware" rules out.
+        guard readNumber("Ftst") == 1 else { return }
+        log.notice("A previous session left the thermal unlock set; returning fans to macOS")
         for fan in 0..<max(0, min(fanCount, maximumFanIndex)) {
             _ = writeNumber("F\(fan)Md", value: 0)
         }
-        if readNumber("Ftst") == 1 {
-            let released = writeNumber("Ftst", value: 0)
-            log.notice("Released a leftover thermal unlock: \(released, privacy: .public)")
-        }
-        log.notice("Startup recovery returned \(min(self.fanCount, self.maximumFanIndex), privacy: .public) fans to macOS")
+        let released = writeNumber("Ftst", value: 0)
+        log.notice("Released the leftover thermal unlock: \(released, privacy: .public)")
     }
 
     @discardableResult
@@ -132,14 +133,18 @@ final class SMCWriter: @unchecked Sendable {
         // Bounded on purpose: this runs on the SMC queue, so every extra second
         // here also delays heartbeats and the return-to-System command, and the
         // app's XPC timeout has to stay comfortably above this budget.
+        let start = Date()
         for attempt in 1...manualModeRetryLimit {
             if writeNumber("F\(fan)Md", value: 1) {
-                log.notice("Fan \(fan, privacy: .public) accepted manual mode after \(attempt, privacy: .public) attempts")
+                let elapsed = Int(Date().timeIntervalSince(start) * 1000)
+                log.notice("Fan \(fan, privacy: .public) accepted manual mode after \(attempt, privacy: .public) attempts, \(elapsed, privacy: .public) ms")
                 return true
             }
             Thread.sleep(forTimeInterval: manualModeRetryDelay)
         }
-        log.error("Fan \(fan, privacy: .public) refused manual mode after \(self.manualModeRetryLimit, privacy: .public) attempts")
+        let elapsed = Int(Date().timeIntervalSince(start) * 1000)
+        let readBack = readNumber("F\(fan)Md").map { Int($0) } ?? -1
+        log.error("Fan \(fan, privacy: .public) refused manual mode after \(self.manualModeRetryLimit, privacy: .public) attempts over \(elapsed, privacy: .public) ms (mode reads back \(readBack, privacy: .public), Ftst \(self.readNumber("Ftst").map { Int($0) } ?? -1, privacy: .public))")
         return false
     }
 

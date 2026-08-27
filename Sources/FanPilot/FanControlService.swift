@@ -41,6 +41,23 @@ final class FanControlService {
 
     var isReady: Bool { state == .ready }
 
+    /// What would actually help in the current state. A stale or mismatched
+    /// helper is not fixed by installing again, and an uninstalled one is not
+    /// fixed by reinstalling, so the interface offers only the one that works.
+    enum RecommendedAction: Equatable {
+        case none
+        case enable
+        case reinstall
+    }
+
+    var recommendedAction: RecommendedAction {
+        switch state {
+        case .ready, .connecting, .notPackaged: .none
+        case .notRegistered, .requiresApproval: .enable
+        case .failed: .reinstall
+        }
+    }
+
     var statusText: String {
         switch state {
         case .notPackaged: "Requires the FanPilot app bundle"

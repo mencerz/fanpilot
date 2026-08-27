@@ -87,12 +87,30 @@ struct FanMenuView: View {
                 FPPanel {
                     LabeledContent("Cooling control") { Text("macOS") }
                     LabeledContent("Helper") { Text(monitor.control.statusText) }
-                    Text("Fan control will be available after the privileged helper is installed.")
+                    Text(helperHint)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Button("Enable Fan Control…") {
-                        Task { await monitor.control.enable() }
+                    HStack(spacing: 10) {
+                        switch monitor.control.recommendedAction {
+                        case .enable:
+                            Button("Enable Fan Control…") {
+                                Task { await monitor.control.enable() }
+                            }
+                        case .reinstall:
+                            Button("Reinstall Helper") {
+                                Task { await monitor.control.reinstall() }
+                            }
+                            Button("Install Again") {
+                                Task { await monitor.control.enable() }
+                            }
+                            .buttonStyle(.link)
+                        case .none:
+                            Button("Enable Fan Control…") {
+                                Task { await monitor.control.enable() }
+                            }
+                            .disabled(true)
+                        }
                     }
                     .disabled(monitor.control.state == .connecting)
                 }
@@ -165,9 +183,13 @@ struct FanMenuView: View {
                 FPRing(title: "Disk", value: monitor.system.diskUsage, caption: diskCaption) {
                     hoveredRing = $0 ? "Disk" : nil
                 }
-                FPRing(title: "Net/min", value: networkFill, caption: networkCaption) {
-                    hoveredRing = $0 ? "Net" : nil
-                }
+                FPRing(
+                    title: "Net",
+                    value: networkFill,
+                    caption: networkUnit,
+                    valueText: networkAmount,
+                    meaning: .activity
+                ) { hoveredRing = $0 ? "Net" : nil }
             }
             // A single detail line beats five tooltips: no hover delay, no
             // popovers covering the rings, and the row height never jumps.
@@ -242,12 +264,21 @@ struct FanMenuView: View {
         "\(compactBytes(monitor.system.diskFreeBytes)) free"
     }
 
-    private var networkCaption: String {
+    // Throughput has no percentage to report, so the ring shows the figure
+    // itself and the caption carries the unit.
+    private var networkAmount: String {
         compactBytes(Int64(monitor.system.networkBytesPerMinute))
+            .split(separator: " ").first.map(String.init) ?? "0"
     }
 
-    /// Traffic has no ceiling, so the ring is scaled against the busiest minute
-    /// seen so far, with a floor that keeps idle traffic from looking maxed out.
+    private var networkUnit: String {
+        let unit = compactBytes(Int64(monitor.system.networkBytesPerMinute))
+            .split(separator: " ").last.map(String.init) ?? "B"
+        return "\(unit) / min"
+    }
+
+    /// Traffic has no ceiling, so the ring is filled against the busiest minute
+    /// seen so far — a relative sense of activity, never an alarm.
     private var networkFill: Double {
         let peak = max(monitor.system.networkPeakBytesPerMinute, 5 * 1024 * 1024)
         return min(Double(monitor.system.networkBytesPerMinute) / Double(peak), 1)
@@ -336,6 +367,14 @@ struct FanMenuView: View {
         let values = monitor.history.recentSamples(limit: 90).compactMap(\.temperature)
         guard let low = values.min(), let high = values.max() else { return "—" }
         return "\(Int(low.rounded()))–\(Int(high.rounded()))°"
+    }
+
+    private var helperHint: String {
+        switch monitor.control.recommendedAction {
+        case .enable: "Fan control will be available after the privileged helper is installed."
+        case .reinstall: "The helper is installed but unreachable — reinstalling restarts it. This is expected after rebuilding the app."
+        case .none: "Fan control will be available after the privileged helper is installed."
+        }
     }
 
     private var statusText: String {

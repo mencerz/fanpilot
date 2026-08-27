@@ -64,15 +64,27 @@ struct FPStatusDot: View {
 /// the ring and the label carries the meaning, so colour stays decorative
 /// until the reading is high enough to matter.
 struct FPRing: View {
+    /// Some readings are pressure — a full ring is a problem worth colouring.
+    /// Others are just activity: a busy network is not a warning, so its ring
+    /// stays neutral no matter how full it is.
+    enum Meaning {
+        case pressure
+        case activity
+    }
+
     let title: String
     let value: Double
     var caption: String?
+    /// Replaces the percentage inside the ring where a percentage would lie.
+    var valueText: String?
+    var meaning: Meaning = .pressure
     var diameter: CGFloat = 58
     var onHover: ((Bool) -> Void)?
 
     private var clamped: Double { min(max(value, 0), 1) }
 
     private var tint: Color {
+        guard meaning == .pressure else { return .accentColor }
         if clamped >= 0.9 { return .red }
         if clamped >= 0.75 { return .orange }
         return .accentColor
@@ -88,8 +100,10 @@ struct FPRing: View {
                     .stroke(tint, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .animation(.easeOut(duration: 0.35), value: clamped)
-                Text("\(Int((clamped * 100).rounded()))")
+                Text(valueText ?? "\(Int((clamped * 100).rounded()))")
                     .font(.title2.weight(.semibold).monospacedDigit())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
             }
             .frame(width: diameter, height: diameter)
             .padding(.bottom, 6)
@@ -109,7 +123,7 @@ struct FPRing: View {
         .contentShape(Rectangle())
         .onHover { onHover?($0) }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(title), \(Int((clamped * 100).rounded())) percent\(caption.map { ", \($0)" } ?? "")")
+        .accessibilityLabel("\(title), \(valueText ?? "\(Int((clamped * 100).rounded())) percent")\(caption.map { ", \($0)" } ?? "")")
     }
 }
 
