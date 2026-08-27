@@ -67,7 +67,8 @@ struct FPRing: View {
     let title: String
     let value: Double
     var caption: String?
-    var diameter: CGFloat = 46
+    var diameter: CGFloat = 50
+    var onHover: ((Bool) -> Void)?
 
     private var clamped: Double { min(max(value, 0), 1) }
 
@@ -88,15 +89,15 @@ struct FPRing: View {
                     .rotationEffect(.degrees(-90))
                     .animation(.easeOut(duration: 0.35), value: clamped)
                 Text("\(Int((clamped * 100).rounded()))")
-                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
             }
             .frame(width: diameter, height: diameter)
             .padding(.bottom, 6)
             Text(title)
-                .font(.caption2.weight(.medium))
+                .font(.caption.weight(.medium))
             if let caption {
                 Text(caption)
-                    .font(.caption2.monospacedDigit())
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     // Traffic can jump from kilobytes to gigabytes, so the
@@ -105,6 +106,8 @@ struct FPRing: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .onHover { onHover?($0) }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(title), \(Int((clamped * 100).rounded())) percent\(caption.map { ", \($0)" } ?? "")")
     }

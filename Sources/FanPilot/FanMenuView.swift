@@ -8,6 +8,7 @@ struct FanMenuView: View {
     /// that window the action would point at itself.
     var showsWindowAction = false
     @Environment(\.openWindow) private var openWindow
+    @State private var hoveredRing: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: FPLayout.section) {
@@ -150,18 +151,59 @@ struct FanMenuView: View {
     private var systemPanel: some View {
         FPPanel {
             HStack(alignment: .top, spacing: 4) {
-                FPRing(
-                    title: "CPU",
-                    value: monitor.system.cpuUsage,
-                    caption: cpuCaption
-                )
-                FPRing(title: "RAM", value: monitor.system.memoryUsage, caption: memoryCaption)
-                if let gpu = monitor.system.gpuUsage {
-                    FPRing(title: "GPU", value: gpu, caption: "shared")
+                FPRing(title: "CPU", value: monitor.system.cpuUsage, caption: cpuCaption) {
+                    hoveredRing = $0 ? "CPU" : nil
                 }
-                FPRing(title: "Disk", value: monitor.system.diskUsage, caption: diskCaption)
-                FPRing(title: "Net/min", value: networkFill, caption: networkCaption)
+                FPRing(title: "RAM", value: monitor.system.memoryUsage, caption: memoryCaption) {
+                    hoveredRing = $0 ? "RAM" : nil
+                }
+                if let gpu = monitor.system.gpuUsage {
+                    FPRing(title: "GPU", value: gpu, caption: "shared") {
+                        hoveredRing = $0 ? "GPU" : nil
+                    }
+                }
+                FPRing(title: "Disk", value: monitor.system.diskUsage, caption: diskCaption) {
+                    hoveredRing = $0 ? "Disk" : nil
+                }
+                FPRing(title: "Net/min", value: networkFill, caption: networkCaption) {
+                    hoveredRing = $0 ? "Net" : nil
+                }
             }
+            // A single detail line beats five tooltips: no hover delay, no
+            // popovers covering the rings, and the row height never jumps.
+            Text(ringDetail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .animation(.easeOut(duration: 0.12), value: hoveredRing)
+        }
+    }
+
+    private var ringDetail: String {
+        let system = monitor.system
+        switch hoveredRing {
+        case "CPU":
+            guard let performance = system.pCoreMHz, let ceiling = system.pCoreMaxMHz, ceiling > 0 else {
+                return "\(ProcessInfo.processInfo.activeProcessorCount) cores, \(Int(system.cpuUsage * 100))% busy"
+            }
+            let efficiency = system.eCoreMHz.map { String(format: " · E-cores %.2f GHz", $0 / 1000) } ?? ""
+            return String(format: "P-cores %.2f of %.2f GHz", performance / 1000, ceiling / 1000) + efficiency
+        case "RAM":
+            let swap = system.swapUsedBytes > 0
+                ? " · swap \(compactBytes(Int64(system.swapUsedBytes)))"
+                : ""
+            return "\(compactBytes(Int64(system.memoryUsedBytes))) used of \(compactBytes(Int64(system.memoryTotalBytes)))" + swap
+        case "GPU":
+            return "\(Int((system.gpuUsage ?? 0) * 100))% device utilisation"
+        case "Disk":
+            let used = max(system.diskTotalBytes - system.diskFreeBytes, 0)
+            return "\(compactBytes(used)) used of \(compactBytes(system.diskTotalBytes)) · \(compactBytes(system.diskFreeBytes)) free"
+        case "Net":
+            return "\(compactBytes(Int64(system.networkBytesPerMinute))) in the last minute · busiest \(compactBytes(Int64(system.networkPeakBytesPerMinute)))"
+        default:
+            return "Point at a ring for details"
         }
     }
 

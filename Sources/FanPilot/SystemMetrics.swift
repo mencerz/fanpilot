@@ -32,6 +32,7 @@ struct SystemMetrics: Equatable, Sendable {
     var swapUsedBytes: UInt64 = 0
     var diskUsage: Double = 0
     var diskFreeBytes: Int64 = 0
+    var diskTotalBytes: Int64 = 0
     /// Absent on Macs whose accelerator does not publish utilisation.
     var gpuUsage: Double?
     /// Apple Silicon exposes no frequency or speed-limit counter; this four
@@ -88,6 +89,7 @@ final class SystemMetricsReader: @unchecked Sendable {
 
         if let (free, capacity) = diskSnapshot(), capacity > 0 {
             metrics.diskFreeBytes = free
+            metrics.diskTotalBytes = capacity
             metrics.diskUsage = min(Double(capacity - free) / Double(capacity), 1)
         }
         metrics.gpuUsage = readGPUUsage()
