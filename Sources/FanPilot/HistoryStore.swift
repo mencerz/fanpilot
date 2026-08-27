@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import FanPilotShared
 
 struct HistorySample: Codable, Equatable, Identifiable, Sendable {
     let capturedAt: Date
@@ -50,6 +51,11 @@ final class HistoryStore {
     private let retention: TimeInterval = 7 * 24 * 60 * 60
     private let persistenceInterval: TimeInterval = 60
     private var lastPersistedAt: Date?
+    /// Wall clock can jump; the recording cadence is measured against uptime so
+    /// a backwards correction cannot silently stop recording.
+    private var lastRecordUptime: TimeInterval?
+    private let maximumSamples = 120_000
+    private let persistQueue = DispatchQueue(label: "\(fanPilotAppIdentifier).history", qos: .utility)
 
     private enum Keys {
         static let isRecording = "history.isRecording"
@@ -89,13 +95,11 @@ final class HistoryStore {
         force: Bool = false
     ) {
         guard isRecording else { return }
-        if !force,
-           let last = samples.last,
-           snapshot.capturedAt.timeIntervalSince(last.capturedAt) < sampleInterval {
-            return
-        }
+        let uptime = ProcessInfo.processInfo.systemUptime
+        if !force, let last = lastRecordUptime, uptime - last < sampleInterval { return }
+        lastRecordUptime = uptime
 
-        samples.append(HistorySample(
+        let sample = HistorySample(
             capturedAt: snapshot.capturedAt,
             temperature: snapshot.temperature,
             fanRPM: snapshot.fans.map(\.currentRPM),
@@ -104,7 +108,14 @@ final class HistoryStore {
             thermalPressure: thermalPressure,
             eCoreMHz: eCoreMHz,
             pCoreMHz: pCoreMHz
-        ))
+        )
+        // A forced record can land on the same timestamp as the periodic one;
+        // two samples sharing an id make SwiftUI charts drop or duplicate marks.
+        if samples.last?.capturedAt == sample.capturedAt {
+            samples[samples.count - 1] = sample
+        } else {
+            samples.append(sample)
+        }
         prune(relativeTo: snapshot.capturedAt)
 
         if force || lastPersistedAt.map({ snapshot.capturedAt.timeIntervalSince($0) >= persistenceInterval }) != false {
@@ -129,18 +140,29 @@ final class HistoryStore {
         persist()
     }
 
+    /// Encoding a week of samples and writing them out takes long enough to
+    /// stutter the interface, so it happens off the main actor.
     func persist() {
-        do {
-            try FileManager.default.createDirectory(
-                at: storageURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            let data = try JSONEncoder.fanPilot.encode(samples)
-            try data.write(to: storageURL, options: .atomic)
-            storageError = nil
-        } catch {
-            storageError = "History could not be saved: \(error.localizedDescription)"
+        let snapshot = samples
+        let url = storageURL
+        persistQueue.async { [weak self] in
+            var failure: String?
+            do {
+                try FileManager.default.createDirectory(
+                    at: url.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try JSONEncoder.fanPilot.encode(snapshot).write(to: url, options: .atomic)
+            } catch {
+                failure = "History could not be saved: \(error.localizedDescription)"
+            }
+            Task { @MainActor in self?.storageError = failure }
         }
+    }
+
+    /// Waits for any queued write. Used by tests and before reading the file back.
+    func flush() {
+        persistQueue.sync {}
     }
 
     private func load() {
@@ -162,8 +184,14 @@ final class HistoryStore {
     }
 
     private func prune(relativeTo date: Date) {
-        let cutoff = date.addingTimeInterval(-retention)
-        samples.removeAll { $0.capturedAt < cutoff }
+        // Measured from the newest sample as well as from now: if the clock is
+        // set back, the stored samples are "in the future" and pruning against
+        // the wrong now would discard them.
+        let reference = max(date, samples.last?.capturedAt ?? date)
+        samples.removeAll { $0.capturedAt < reference.addingTimeInterval(-retention) }
+        if samples.count > maximumSamples {
+            samples.removeFirst(samples.count - maximumSamples)
+        }
     }
 
     private static var defaultStorageURL: URL {

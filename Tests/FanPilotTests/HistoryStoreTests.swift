@@ -36,6 +36,7 @@ func historyCoalescesPersistsAndReloadsSamples() throws {
     )
 
     #expect(store.samples.count == 2)
+    store.flush()
     let reloaded = HistoryStore(storageURL: url, defaults: isolatedDefaults())
     #expect(reloaded.samples == store.samples)
 }
@@ -103,7 +104,53 @@ func unreadableHistoryIsQuarantinedInsteadOfOverwritten() throws {
         targetPercent: nil,
         force: true
     )
+    store.flush()
     let quarantined = url.appendingPathExtension("unreadable")
     #expect(FileManager.default.fileExists(atPath: quarantined.path))
     #expect(try Data(contentsOf: quarantined) == Data("{ this is not history }".utf8))
+}
+
+@Test @MainActor
+func forcedRecordReplacesTheSampleItSharesATimestampWith() {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("FanPilotTests-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let store = HistoryStore(
+        storageURL: directory.appendingPathComponent("history.json"),
+        defaults: isolatedDefaults()
+    )
+    let snapshot = ThermalSnapshot(
+        temperature: 55,
+        fans: [FanReading(id: 0, name: "Fan", currentRPM: 2_400, minimumRPM: 2_317, maximumRPM: 6_550)],
+        capturedAt: .now
+    )
+
+    store.record(snapshot: snapshot, mode: .system, targetPercent: nil, force: true)
+    store.record(snapshot: snapshot, mode: .manual, targetPercent: 40, force: true)
+
+    // Identical ids would make SwiftUI charts drop or duplicate marks.
+    #expect(store.samples.count == 1)
+    #expect(store.samples.last?.mode == .manual)
+    #expect(store.samples.last?.targetPercent == 40)
+}
+
+@Test @MainActor
+func samplesStoredAheadOfTheClockSurviveALoad() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("FanPilotTests-\(UUID().uuidString)", isDirectory: true)
+    let url = directory.appendingPathComponent("history.json")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+    // What a backwards clock correction leaves behind: history "in the future".
+    let ahead = Date().timeIntervalSince1970 + 30 * 24 * 60 * 60
+    let json = """
+    [{"capturedAt":\(ahead - 60),"temperature":50,"fanRPM":[2400],"mode":"System"},
+     {"capturedAt":\(ahead),"temperature":51,"fanRPM":[2400],"mode":"System"}]
+    """
+    try Data(json.utf8).write(to: url)
+
+    let store = HistoryStore(storageURL: url, defaults: isolatedDefaults())
+    #expect(store.samples.count == 2)
 }

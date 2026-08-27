@@ -34,6 +34,8 @@ open dist/FanPilot.app
 
 Then open Settings and choose **Enable Fan Control…**. macOS asks for approval in **System Settings → General → Login Items & Extensions**.
 
+Unsigned builds pin the helper by code hash, which changes on every rebuild, so after rebuilding press **Reinstall Helper** in Settings once. Signed builds pin by team identifier instead and survive rebuilds.
+
 To work in Xcode, open `Package.swift` and pick the **FanPilot App** scheme: it assembles the bundle and launches it. The plain `FanPilot` scheme runs the bare executable, which works for monitoring but cannot install the helper.
 
 ## Downloading a release

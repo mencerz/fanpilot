@@ -24,6 +24,9 @@ final class FanControlService {
         }
     }
     private var connection: NSXPCConnection?
+    /// Bumped on every disconnect so a reply belonging to a connection that has
+    /// already been torn down cannot overwrite the state of its replacement.
+    private var epoch = 0
     private var lastRecoveryAttempt: Date?
     private var removedLegacyHelpers = false
 
@@ -113,12 +116,23 @@ final class FanControlService {
         }
         log.notice("Reinstalling helper")
         disconnect()
+        let service = SMAppService.daemon(plistName: fanPilotHelperPlistName)
         do {
-            try await SMAppService.daemon(plistName: fanPilotHelperPlistName).unregister()
+            try await service.unregister()
         } catch {
             log.error("unregister() said: \(error.localizedDescription, privacy: .public)")
         }
+        // Background Task Management applies the removal asynchronously, and a
+        // register() issued before it settles is refused with "Operation not
+        // permitted" even though the reinstall then completes anyway.
+        for _ in 0..<20 where service.status == .enabled {
+            try? await Task.sleep(for: .milliseconds(150))
+        }
         await enable()
+        if !isReady {
+            try? await Task.sleep(for: .milliseconds(500))
+            await enable()
+        }
     }
 
     /// Reconnects after the helper was interrupted, restarted or updated,
@@ -150,6 +164,17 @@ final class FanControlService {
         remoteProxy()?.heartbeat { _ in }
     }
 
+    /// Termination does not wait for async work, so the last hand-back to macOS
+    /// has to be a blocking call rather than a Task nobody will run.
+    func setSystemModeSynchronously(timeout: TimeInterval = 2) {
+        guard let connection else { return }
+        let done = DispatchSemaphore(value: 0)
+        let onError: @Sendable (any Error) -> Void = { _ in done.signal() }
+        let proxy = connection.synchronousRemoteObjectProxyWithErrorHandler(onError) as? FanPilotHelperProtocol
+        proxy?.setSystemMode { _, _ in done.signal() }
+        _ = done.wait(timeout: .now() + timeout)
+    }
+
     private func connect() async {
         disconnect()
         let newConnection = NSXPCConnection(
@@ -172,11 +197,13 @@ final class FanControlService {
         newConnection.resume()
         connection = newConnection
 
+        let attempt = epoch
         let result: Result<Void, ControlError> = await call(timeout: connectTimeout) { proxy, finish in
             proxy.status { ready, message in
                 finish(ready ? .success(()) : .failure(.helper(message ?? "Helper did not become ready.")))
             }
         }
+        guard attempt == epoch else { return }
         switch result {
         case .success: state = .ready
         case .failure(let error):
@@ -193,6 +220,7 @@ final class FanControlService {
         _ body: @escaping @Sendable (FanPilotHelperProtocol, @escaping @Sendable (Result<T, ControlError>) -> Void) -> Void
     ) async -> Result<T, ControlError> {
         guard let connection else { return .failure(.notConnected) }
+        let issuedAt = epoch
         let result: Result<T, ControlError> = await withCheckedContinuation { continuation in
             let once = ResumeOnce(continuation)
             // XPC invokes this from its own queue. Declared inline it would
@@ -213,7 +241,7 @@ final class FanControlService {
         }
         if case .failure(let error) = result {
             log.error("Helper call failed: \(error.localizedDescription, privacy: .public)")
-            if error.breaksConnection { state = .failed(error.localizedDescription) }
+            if error.breaksConnection, issuedAt == epoch { state = .failed(error.localizedDescription) }
         }
         return result
     }
@@ -226,6 +254,7 @@ final class FanControlService {
     }
 
     private func disconnect() {
+        epoch &+= 1
         connection?.interruptionHandler = nil
         connection?.invalidationHandler = nil
         connection?.invalidate()

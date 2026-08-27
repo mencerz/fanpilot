@@ -41,6 +41,9 @@ final class FanMonitor {
     private var suspendedMode: FanMode?
     private var isApplying = false
     private(set) var isSleeping = false
+    /// Set when the helper did not confirm the hand-back, so it can be retried
+    /// instead of the UI quietly claiming macOS is in charge.
+    private(set) var awaitingSystemRestore = false
 
     private let sensorErrorMessage = "SMC did not return any readings. Access is restricted on some Apple Silicon models."
 
@@ -358,7 +361,7 @@ final class FanMonitor {
                     pendingFailure = error.localizedDescription
                     return false
                 }
-                _ = await control.setSystemMode()
+                requestSystemMode()
                 mode = .system
                 autopilot.reset(to: curve.minimumPercent)
                 clearControlState()
@@ -424,6 +427,8 @@ final class FanMonitor {
     }
 
     private func observeSystemEvents() {
+        // Workspace notifications and the app's own termination notice come
+        // from different centres; both are removed again in stop().
         let center = NSWorkspace.shared.notificationCenter
         workspaceObservers.append(center.addObserver(
             forName: NSWorkspace.willSleepNotification,
@@ -438,6 +443,16 @@ final class FanMonitor {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in await self?.restoreAfterWake() }
+        })
+        workspaceObservers.append(NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.mode != .system else { return }
+                self.control.setSystemModeSynchronously()
+            }
         })
     }
 
@@ -485,6 +500,7 @@ final class FanMonitor {
         autopilot.reset(to: curve.minimumPercent)
         clearControlState()
         lastError = reason
+        requestSystemMode()
         history.record(
             snapshot: snapshot,
             mode: .system,
@@ -494,7 +510,35 @@ final class FanMonitor {
             pCoreMHz: system.pCoreMHz.map { Int($0.rounded()) },
             force: true
         )
-        Task { _ = await control.setSystemMode() }
+    }
+
+    /// The helper can refuse or be unreachable; until it confirms, the app says
+    /// so and keeps asking rather than assuming the fans are free.
+    private func requestSystemMode() {
+        awaitingSystemRestore = true
+        Task {
+            switch await control.setSystemMode() {
+            case .success:
+                awaitingSystemRestore = false
+            case .failure(let error):
+                lastError = "macOS has not confirmed it is back in control of the fans: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Invalidates the timer and drops the workspace observers. The app calls
+    /// this on termination; tests call it so a monitor does not outlive them.
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        NSWorkspace.shared.notificationCenter.removeObserver(workspaceObservers[0])
+        if workspaceObservers.count > 1 {
+            NSWorkspace.shared.notificationCenter.removeObserver(workspaceObservers[1])
+        }
+        if workspaceObservers.count > 2 {
+            NotificationCenter.default.removeObserver(workspaceObservers[2])
+        }
+        workspaceObservers.removeAll()
     }
 
     private func loadProfileSettings() {

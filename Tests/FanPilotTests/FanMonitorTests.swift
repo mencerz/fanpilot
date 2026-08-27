@@ -33,7 +33,10 @@ private func healthySnapshot(temperature: Double = 55) -> ThermalSnapshot {
 @Test @MainActor
 func monitorRefusesFanControlWithoutHelper() {
     let (monitor, directory) = makeMonitor(StubHardware(snapshot: healthySnapshot()))
-    defer { try? FileManager.default.removeItem(at: directory) }
+    defer {
+        monitor.stop()
+        try? FileManager.default.removeItem(at: directory)
+    }
 
     monitor.selectMode(.manual)
 
@@ -46,7 +49,10 @@ func monitorRefusesFanControlWithoutHelper() {
 func sensorErrorClearsOnceReadingsReturnButSurvivesEachRefresh() {
     let hardware = StubHardware(snapshot: ThermalSnapshot(temperature: nil, fans: [], capturedAt: .now))
     let (monitor, directory) = makeMonitor(hardware)
-    defer { try? FileManager.default.removeItem(at: directory) }
+    defer {
+        monitor.stop()
+        try? FileManager.default.removeItem(at: directory)
+    }
 
     #expect(monitor.lastError != nil)
     monitor.refresh(force: true)
@@ -83,7 +89,10 @@ func systemMetricsStayWithinPlausibleRanges() async throws {
 func pausedPolicyStopsSamplingWhileNothingIsOnScreen() {
     let hardware = StubHardware(snapshot: healthySnapshot(temperature: 55))
     let (monitor, directory) = makeMonitor(hardware)
-    defer { try? FileManager.default.removeItem(at: directory) }
+    defer {
+        monitor.stop()
+        try? FileManager.default.removeItem(at: directory)
+    }
 
     monitor.hiddenRefreshPolicy = .paused
     hardware.snapshot = healthySnapshot(temperature: 91)
@@ -99,7 +108,10 @@ func pausedPolicyStopsSamplingWhileNothingIsOnScreen() {
 func refreshIntervalThrottlesSampling() {
     let hardware = StubHardware(snapshot: healthySnapshot(temperature: 55))
     let (monitor, directory) = makeMonitor(hardware)
-    defer { try? FileManager.default.removeItem(at: directory) }
+    defer {
+        monitor.stop()
+        try? FileManager.default.removeItem(at: directory)
+    }
 
     monitor.refreshInterval = 30
     hardware.snapshot = healthySnapshot(temperature: 91)
@@ -113,7 +125,10 @@ func refreshIntervalThrottlesSampling() {
 @Test @MainActor
 func systemModeIsAlwaysReachableWhileASwitchIsPending() {
     let (monitor, directory) = makeMonitor(StubHardware(snapshot: healthySnapshot()))
-    defer { try? FileManager.default.removeItem(at: directory) }
+    defer {
+        monitor.stop()
+        try? FileManager.default.removeItem(at: directory)
+    }
 
     // Without a helper the switch is refused outright, but the escape hatch
     // back to System must never be blocked by a pending request.
