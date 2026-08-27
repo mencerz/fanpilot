@@ -67,7 +67,7 @@ struct FPRing: View {
     let title: String
     let value: Double
     var caption: String?
-    var diameter: CGFloat = 50
+    var diameter: CGFloat = 52
     var onHover: ((Bool) -> Void)?
 
     private var clamped: Double { min(max(value, 0), 1) }
@@ -89,15 +89,15 @@ struct FPRing: View {
                     .rotationEffect(.degrees(-90))
                     .animation(.easeOut(duration: 0.35), value: clamped)
                 Text("\(Int((clamped * 100).rounded()))")
-                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .font(.title3.weight(.semibold).monospacedDigit())
             }
             .frame(width: diameter, height: diameter)
             .padding(.bottom, 6)
             Text(title)
-                .font(.caption.weight(.medium))
+                .font(.subheadline.weight(.medium))
             if let caption {
                 Text(caption)
-                    .font(.caption.monospacedDigit())
+                    .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     // Traffic can jump from kilobytes to gigabytes, so the

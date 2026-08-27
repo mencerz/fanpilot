@@ -50,7 +50,7 @@ struct FanPilotApp: App {
         // bar must focus the existing window, not spawn another copy.
         Window("FanPilot", id: "main") {
             FanMenuView(monitor: monitor)
-                .frame(minWidth: 392, idealWidth: 420, maxWidth: 480)
+                .frame(minWidth: 424, idealWidth: 440, maxWidth: 500)
                 .padding(.vertical, 4)
         }
         .defaultSize(width: 420, height: 620)
@@ -63,7 +63,7 @@ struct FanPilotApp: App {
 
         MenuBarExtra {
             FanMenuView(monitor: monitor, showsWindowAction: true)
-                .frame(width: 392)
+                .frame(width: 424)
                 .onAppear { monitor.setPopoverVisible(true) }
                 .onDisappear { monitor.setPopoverVisible(false) }
         } label: {
