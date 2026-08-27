@@ -172,7 +172,7 @@ struct FanMenuView: View {
             // A single detail line beats five tooltips: no hover delay, no
             // popovers covering the rings, and the row height never jumps.
             Text(ringDetail)
-                .font(.callout.monospacedDigit())
+                .font(.body.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)

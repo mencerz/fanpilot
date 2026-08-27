@@ -67,7 +67,7 @@ struct FPRing: View {
     let title: String
     let value: Double
     var caption: String?
-    var diameter: CGFloat = 52
+    var diameter: CGFloat = 58
     var onHover: ((Bool) -> Void)?
 
     private var clamped: Double { min(max(value, 0), 1) }
@@ -82,22 +82,22 @@ struct FPRing: View {
         VStack(spacing: 2) {
             ZStack {
                 Circle()
-                    .stroke(Color(nsColor: .separatorColor), lineWidth: 5)
+                    .stroke(Color(nsColor: .separatorColor), lineWidth: 6)
                 Circle()
                     .trim(from: 0, to: max(clamped, 0.001))
-                    .stroke(tint, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                    .stroke(tint, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .animation(.easeOut(duration: 0.35), value: clamped)
                 Text("\(Int((clamped * 100).rounded()))")
-                    .font(.title3.weight(.semibold).monospacedDigit())
+                    .font(.title2.weight(.semibold).monospacedDigit())
             }
             .frame(width: diameter, height: diameter)
             .padding(.bottom, 6)
             Text(title)
-                .font(.subheadline.weight(.medium))
+                .font(.body.weight(.medium))
             if let caption {
                 Text(caption)
-                    .font(.callout.monospacedDigit())
+                    .font(.body.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     // Traffic can jump from kilobytes to gigabytes, so the
