@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test
+        run: |
+          swift build -c release
+          swift test
+
+      - name: Assemble app bundle
+        run: zsh scripts/build-app.sh
+
+      # Signing runs only when the secrets exist, so forks and first-time
+      # builds still produce a (locally signed) artifact instead of failing.
+      - name: Sign with Developer ID
+        if: env.MACOS_CERTIFICATE != ''
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          echo "$MACOS_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p runner build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p runner build.keychain
+          security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k runner build.keychain
+          codesign --force --options runtime --timestamp \
+            --sign "$MACOS_SIGNING_IDENTITY" --identifier com.oleksii.baliuk.fanpilot.helper \
+            dist/FanPilot.app/Contents/MacOS/FanPilotHelper
+          codesign --force --options runtime --timestamp \
+            --sign "$MACOS_SIGNING_IDENTITY" --identifier com.oleksii.baliuk.fanpilot.app \
+            dist/FanPilot.app/Contents/MacOS/FanPilot
+          codesign --force --options runtime --timestamp \
+            --sign "$MACOS_SIGNING_IDENTITY" --identifier com.oleksii.baliuk.fanpilot.app \
+            dist/FanPilot.app
+          rm -f certificate.p12
+
+      - name: Notarize and staple
+        if: env.NOTARY_KEY != ''
+        env:
+          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          echo "$NOTARY_KEY" | base64 --decode > notary.p8
+          ditto -c -k --keepParent dist/FanPilot.app FanPilot-notarize.zip
+          xcrun notarytool submit FanPilot-notarize.zip \
+            --key notary.p8 --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --wait
+          xcrun stapler staple dist/FanPilot.app
+          rm -f notary.p8 FanPilot-notarize.zip
+
+      - name: Package
+        run: ditto -c -k --keepParent dist/FanPilot.app FanPilot.zip
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: FanPilot.zip
+          generate_release_notes: true

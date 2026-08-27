@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Legacy daemon description kept only so the app can unregister
+     the old com.fanpilot.helper job. Delete once every install migrated. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.fanpilot.helper</string>
+    <key>BundleProgram</key><string>Contents/MacOS/FanPilotHelper</string>
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>com.oleksii.baliuk.fanpilot.app</string>
+        <string>com.fanpilot.app</string>
+    </array>
+    <key>MachServices</key>
+    <dict><key>com.fanpilot.helper</key><true/></dict>
+    <key>ProcessType</key><string>Interactive</string>
+</dict>
+</plist>
