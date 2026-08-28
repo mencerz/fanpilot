@@ -13,11 +13,13 @@ struct HistoryView: View {
         let samples = monitor.history.samples(since: Date().addingTimeInterval(-range.duration))
         let hovered = hoveredDate.flatMap { nearestSample(to: $0, in: samples) }
 
+        let timeline = timeline(for: samples)
+
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 header
                 diagnostics
-                charts(samples: samples, hovered: hovered)
+                charts(samples: samples, hovered: hovered, timeline: timeline)
                 tuning
             }
             .padding(24)
@@ -71,8 +73,27 @@ struct HistoryView: View {
         }
     }
 
+    /// Every chart is pinned to this, because each one otherwise derives its
+    /// own scale from its own marks: frequency data starts a sample later than
+    /// temperature, the fan series can be absent entirely, and the pressure
+    /// bands extend past the final sample on two charts out of three. The
+    /// cursors would then sit at the same instant but at different x positions.
+    private func timeline(for samples: [HistorySample]) -> ClosedRange<Date> {
+        guard let first = samples.first?.capturedAt, let last = samples.last?.capturedAt else {
+            let now = Date()
+            return now.addingTimeInterval(-60)...now
+        }
+        return first...last.addingTimeInterval(bandPadding)
+    }
+
+    private var bandPadding: TimeInterval { max(monitor.history.sampleInterval, 5) }
+
     @ViewBuilder
-    private func charts(samples: [HistorySample], hovered: HistorySample?) -> some View {
+    private func charts(
+        samples: [HistorySample],
+        hovered: HistorySample?,
+        timeline: ClosedRange<Date>
+    ) -> some View {
         if samples.isEmpty {
             ContentUnavailableView(
                 "No History Yet",
@@ -83,15 +104,19 @@ struct HistoryView: View {
             )
             .frame(height: 240)
         } else {
-            temperatureChart(samples: samples, hovered: hovered)
-            frequencyChart(samples: samples, hovered: hovered)
+            temperatureChart(samples: samples, hovered: hovered, timeline: timeline)
+            frequencyChart(samples: samples, hovered: hovered, timeline: timeline)
             if samples.contains(where: { !$0.fanRPM.isEmpty }) {
-                fanChart(samples: samples, hovered: hovered)
+                fanChart(samples: samples, hovered: hovered, timeline: timeline)
             }
         }
     }
 
-    private func temperatureChart(samples: [HistorySample], hovered: HistorySample?) -> some View {
+    private func temperatureChart(
+        samples: [HistorySample],
+        hovered: HistorySample?,
+        timeline: ClosedRange<Date>
+    ) -> some View {
         let values = samples.compactMap(\.temperature)
         let domain = temperatureDomain(for: values)
         return FPPanel {
@@ -159,6 +184,7 @@ struct HistoryView: View {
                     .symbolSize(70)
                 }
             }
+            .chartXScale(domain: timeline)
             .chartYScale(domain: domain)
             .chartYAxisLabel("°C")
             .frame(height: 190)
@@ -167,7 +193,11 @@ struct HistoryView: View {
     }
 
     @ViewBuilder
-    private func frequencyChart(samples: [HistorySample], hovered: HistorySample?) -> some View {
+    private func frequencyChart(
+        samples: [HistorySample],
+        hovered: HistorySample?,
+        timeline: ClosedRange<Date>
+    ) -> some View {
         let performance = samples.compactMap(\.pCoreMHz)
         if performance.isEmpty {
             EmptyView()
@@ -247,6 +277,7 @@ struct HistoryView: View {
                         }
                     }
                 }
+                .chartXScale(domain: timeline)
                 .chartYAxisLabel("MHz")
                 .frame(height: 190)
                 .chartOverlay { proxy in hoverCatcher(proxy) }
@@ -254,7 +285,11 @@ struct HistoryView: View {
         }
     }
 
-    private func fanChart(samples: [HistorySample], hovered: HistorySample?) -> some View {
+    private func fanChart(
+        samples: [HistorySample],
+        hovered: HistorySample?,
+        timeline: ClosedRange<Date>
+    ) -> some View {
         let values = samples.flatMap(\.fanRPM)
         return FPPanel {
             HStack {
@@ -312,6 +347,7 @@ struct HistoryView: View {
                     }
                 }
             }
+            .chartXScale(domain: timeline)
             .chartYAxisLabel("RPM")
             .frame(height: 190)
             .chartOverlay { proxy in hoverCatcher(proxy) }
@@ -425,7 +461,7 @@ struct HistoryView: View {
     /// Apple Silicon reports no frequencies, only this four level pressure
     /// signal, so the chart shows where the system said it was struggling.
     private func pressureRuns(in samples: [HistorySample]) -> [PressureRun] {
-        let padding = max(monitor.history.sampleInterval, 5)
+        let padding = bandPadding
         var runs: [PressureRun] = []
         var open: (level: ThermalPressure, start: Date, end: Date)?
 
