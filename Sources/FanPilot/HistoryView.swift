@@ -85,7 +85,9 @@ struct HistoryView: View {
         } else {
             temperatureChart(samples: samples, hovered: hovered)
             frequencyChart(samples: samples, hovered: hovered)
-            fanChart(samples: samples, hovered: hovered)
+            if samples.contains(where: { !$0.fanRPM.isEmpty }) {
+                fanChart(samples: samples, hovered: hovered)
+            }
         }
     }
 

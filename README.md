@@ -37,6 +37,8 @@ Writing to the SMC needs root, so fan control runs through a privileged helper i
 - A fan that refuses to switch back stays on the retry list, and the thermal unlock is held until every fan is verified to be back under system control.
 - If the connection is lost, the app drops to System mode and says so rather than pretending it is still in charge.
 
+On a Mac without fans — the Airs — FanPilot says so and runs monitoring-only: temperature, frequencies, rings and history all work, the mode picker is hidden, and the privileged helper is not offered at all, because a root daemon that cannot reach a fan is risk without benefit.
+
 Not every Mac hands its fans over. The SMC on Apple Silicon rejects manual mode intermittently; FanPilot retries for a few seconds and then tells you, instead of silently reverting.
 
 ## Build

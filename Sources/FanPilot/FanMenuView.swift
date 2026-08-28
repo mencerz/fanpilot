@@ -31,9 +31,12 @@ struct FanMenuView: View {
 
             if monitor.snapshot.fans.isEmpty {
                 FPPanel {
-                    Label("Fan data unavailable", systemImage: "fanblades")
+                    Label(monitor.isMonitoringOnly ? "Monitoring only" : "Fan data unavailable",
+                          systemImage: "fanblades")
                         .font(.body.weight(.medium))
-                    Text("This Mac did not expose fan sensors. Fan control is unavailable.")
+                    Text(monitor.isMonitoringOnly
+                         ? "This Mac reports no fans, so cooling stays with macOS. Temperature, frequencies and history all work."
+                         : "This Mac did not expose fan sensors. Fan control is unavailable.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -470,6 +473,13 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Section("Fan control helper") {
+                if !monitor.hasFanReadings {
+                    // Installing a privileged daemon that cannot reach a fan is
+                    // pure risk, so it is not offered on hardware without one.
+                    Text("This Mac reports no fans. FanPilot runs in monitoring-only mode and the privileged helper is not needed.")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
                 LabeledContent("Status", value: monitor.control.statusText)
                 HStack {
                     if !monitor.control.isReady {
@@ -483,6 +493,7 @@ struct SettingsView: View {
                     .help("Unregisters and registers the daemon again, so a rebuilt helper is picked up")
                 }
                 .disabled(monitor.control.state == .connecting)
+                }
             }
         }
         .formStyle(.grouped)

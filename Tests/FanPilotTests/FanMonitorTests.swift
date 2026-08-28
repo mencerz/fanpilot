@@ -164,3 +164,22 @@ func cpuFrequencyMatchesTheHardwareCeiling() async throws {
     #expect(performance.megahertz <= performance.maximumMegahertz)
     #expect((0...1).contains(performance.loadRatio))
 }
+
+@Test @MainActor
+func aFanlessMacIsMonitoringOnly() {
+    // What an Air reports: temperature sensors, no fans at all.
+    let fanless = ThermalSnapshot(temperature: 52, fans: [], capturedAt: .now)
+    let (monitor, directory) = makeMonitor(StubHardware(snapshot: fanless))
+    defer {
+        monitor.stop()
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    #expect(monitor.isMonitoringOnly)
+    #expect(!monitor.isFanControlAvailable)
+    #expect(monitor.lastError == nil)
+
+    monitor.selectMode(.manual)
+    #expect(monitor.mode == .system)
+    #expect(monitor.lastError?.contains("no fan sensors") == true)
+}

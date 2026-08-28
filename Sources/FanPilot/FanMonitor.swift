@@ -146,7 +146,13 @@ final class FanMonitor {
     }
 
     var hasFanReadings: Bool { !snapshot.fans.isEmpty }
-    var isFanControlAvailable: Bool { control.isReady }
+    /// A fanless Mac — the Airs — has nothing to control no matter how healthy
+    /// the helper is, so the whole control surface stays out of the way there.
+    var isFanControlAvailable: Bool { control.isReady && hasFanReadings }
+
+    var isMonitoringOnly: Bool {
+        !hasFanReadings && snapshot.temperature != nil
+    }
 
     var targetPercent: Double {
         switch mode {
