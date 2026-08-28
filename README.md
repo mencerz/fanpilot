@@ -2,7 +2,7 @@
 
 A native macOS menu bar app for watching what a MacBook is doing thermally — and, when you ask it to, for driving the fans yourself.
 
-Built for Apple Silicon (developed on an M4, Mac16,1) with Intel fallbacks in the sensor layer.
+Built for Apple Silicon — developed on a 14-inch MacBook Pro with the base M4, which reports itself as `Mac16,1` — with Intel fallbacks in the sensor layer.
 
 <p align="center">
   <img src="Docs/screenshots/menu-bar.png" alt="FanPilot menu bar popover" width="420">
